@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Photo Grid Maker - Clean & Free</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background: #f4f4f4; }
+        .container { max-width: 1300px; margin: 0 auto; display: flex; gap: 20px; flex-wrap: wrap; }
+        .sidebar { width: 320px; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        .canvas-container { flex: 1; min-width: 600px; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        canvas { border: 2px solid #ddd; max-width: 100%; height: auto; background: #fff; }
+        button, select, input[type="color"] { margin: 6px 0; }
+        button { padding: 10px 16px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; }
+        button:hover { background: #0056b3; }
+        .photo-list { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+        .thumb { width: 60px; height: 60px; object-fit: cover; border: 2px solid #ddd; cursor: move; border-radius: 4px; }
+        .control-group { margin: 15px 0; padding: 10px; background: #f9f9f9; border-radius: 6px; }
+        .size-btn { display: inline-block; padding: 6px 12px; margin: 4px; background: #eee; border-radius: 4px; cursor: pointer; font-size: 0.9em; }
+        .size-btn:hover, .size-btn.active { background: #007bff; color: white; }
+    </style>
+</head>
+<body>
+    <h1>Photo Grid Maker (Clean & Free)</h1>
+    <div class="container">
+        <div class="sidebar">
+            <h3>Photos</h3>
+            <input type="file" id="upload" multiple accept="image/*">
+            <button onclick="clearPhotos()">Clear All Photos</button>
+
+            <h3>Grid</h3>
+            <div class="control-group">
+                <label>Rows: <input type="number" id="rows" value="3" min="1" max="12" oninput="updateGrid()"></label><br>
+                <label>Columns: <input type="number" id="cols" value="3" min="1" max="12" oninput="updateGrid()"></label>
+            </div>
+
+            <h3>Spacing</h3>
+            <div class="control-group">
+                <label><input type="checkbox" id="enableGap" checked onchange="updateGrid()"> Enable Gap</label><br>
+                <label>Gap Size: <input type="range" id="gap" min="0" max="60" value="12" oninput="updateGrid()">
+                <span id="gapValue">12</span>px</label>
+            </div>
+
+            <h3>Borders</h3>
+            <div class="control-group">
+                <label><input type="checkbox" id="enableBorder" checked onchange="updateGrid()"> Enable Border</label><br>
+                <label>Thickness: <input type="range" id="borderSize" min="0" max="30" value="6" oninput="updateGrid()">
+                <span id="borderValue">6</span>px</label><br>
+                <label>Border Color: <input type="color" id="borderColor" value="#ffffff" onchange="updateGrid()"></label><br>
+                <label><input type="checkbox" id="rounded" checked onchange="updateGrid()"> Rounded Corners</label>
+            </div>
+
+            <h3>Size & Orientation</h3>
+            <div id="size-options"></div>
+            <button onclick="toggleOrientation()">Toggle Landscape / Portrait</button>
+
+            <h3>Background</h3>
+            <select id="bgColor" onchange="updateGrid()">
+                <option value="#ffffff">White</option>
+                <option value="#000000">Black</option>
+                <option value="#f0f0f0">Light Gray</option>
+                <option value="#2c3e50">Dark</option>
+            </select>
+
+            <div class="control-group">
+                <button onclick="shufflePhotos()">Shuffle</button>
+                <button onclick="downloadImage('png')">Download PNG</button>
+                <button onclick="downloadImage('pdf')">Download PDF</button>
+            </div>
+        </div>
+
+        <div class="canvas-container">
+            <canvas id="gridCanvas" width="900" height="900"></canvas>
+            <div class="photo-list" id="photoList"></div>
+        </div>
+    </div>
+
+    <script>
+        let photos = [];
+        let orientation = 'landscape';
+
+        const canvas = document.getElementById('gridCanvas');
+        const ctx = canvas.getContext('2d');
+        const photoListEl = document.getElementById('photoList');
+
+        const sizes = [
+            {name: "Square", ratio: 1},
+            {name: "4x6", ratio: 6/4},
+            {name: "5x7", ratio: 7/5},
+            {name: "8x10", ratio: 10/8},
+            {name: "Instagram", ratio: 1},
+            {name: "A4", ratio: 297/210},
+        ];
+
+        let currentWidth = 900;
+        let currentHeight = 900;
+
+        function createSizeButtons() {
+            const container = document.getElementById('size-options');
+            container.innerHTML = '';
+            sizes.forEach(size => {
+                const btn = document.createElement('div');
+                btn.className = 'size-btn';
+                btn.textContent = size.name;
+                btn.onclick = () => {
+                    document.querySelectorAll('.size-btn').forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    const base = 900;
+                    currentWidth = base;
+                    currentHeight = Math.round(base * size.ratio);
+                    if (orientation === 'portrait') [currentWidth, currentHeight] = [currentHeight, currentWidth];
+                    canvas.width = currentWidth;
+                    canvas.height = currentHeight;
+                    updateGrid();
+                };
+                container.appendChild(btn);
+            });
+        }
+
+        document.getElementById('upload').addEventListener('change', e => {
+            Array.from(e.target.files).forEach(file => {
+                const reader = new FileReader();
+                reader.onload = ev => {
+                    const img = new Image();
+                    img.src = ev.target.result;
+                    img.onload = () => {
+                        photos.push(img);
+                        renderPhotoList();
+                        updateGrid();
+                    };
+                };
+                reader.readAsDataURL(file);
+            });
+        });
+
+        function renderPhotoList() {
+            photoListEl.innerHTML = '';
+            photos.forEach((img, i) => {
+                const thumb = document.createElement('img');
+                thumb.src = img.src;
+                thumb.className = 'thumb';
+                thumb.draggable = true;
+                thumb.dataset.index = i;
+                thumb.ondragstart = e => e.dataTransfer.setData('text/plain', i);
+                photoListEl.appendChild(thumb);
+            });
+        }
+
+        photoListEl.ondragover = e => e.preventDefault();
+        photoListEl.ondrop = e => {
+            e.preventDefault();
+            const from = parseInt(e.dataTransfer.getData('text/plain'));
+            const toEl = e.target.closest('img');
+            if (!toEl) return;
+            const to = parseInt(toEl.dataset.index);
+            if (from !== to) {
+                [photos[from], photos[to]] = [photos[to], photos[from]];
+                renderPhotoList();
+                updateGrid();
+            }
+        };
+
+        function updateGrid() {
+            const rows = parseInt(document.getElementById('rows').value) || 3;
+            const cols = parseInt(document.getElementById('cols').value) || 3;
+            const enableGap = document.getElementById('enableGap').checked;
+            const gap = enableGap ? parseInt(document.getElementById('gap').value) : 0;
+            const enableBorder = document.getElementById('enableBorder').checked;
+            const border = enableBorder ? parseInt(document.getElementById('borderSize').value) : 0;
+            const borderColor = document.getElementById('borderColor').value;
+            const rounded = document.getElementById('rounded').checked;
+            const bg = document.getElementById('bgColor').value;
+
+            document.getElementById('gapValue').textContent = gap;
+            document.getElementById('borderValue').textContent = border;
+
+            ctx.fillStyle = bg;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            const totalGapW = gap * (cols - 1);
+            const totalGapH = gap * (rows - 1);
+            const cellW = (canvas.width - totalGapW) / cols;
+            const cellH = (canvas.height - totalGapH) / rows;
+
+            let idx = 0;
+            for (let r = 0; r < rows; r++) {
+                for (let c = 0; c < cols; c++) {
+                    const img = photos[idx % photos.length];
+                    if (!img) { idx++; continue; }
+
+                    const x = c * (cellW + gap);
+                    const y = r * (cellH + gap);
+
+                    // Border
+                    if (border > 0) {
+                        ctx.fillStyle = borderColor;
+                        ctx.beginPath();
+                        if (rounded) {
+                            ctx.roundRect(x, y, cellW, cellH, 18);
+                        } else {
+                            ctx.rect(x, y, cellW, cellH);
+                        }
+                        ctx.fill();
+                    }
+
+                    // Image
+                    const innerX = x + border;
+                    const innerY = y + border;
+                    const innerW = cellW - border * 2;
+                    const innerH = cellH - border * 2;
+
+                    ctx.save();
+                    if (rounded && innerW > 0) {
+                        ctx.beginPath();
+                        ctx.roundRect(innerX, innerY, innerW, innerH, 14);
+                        ctx.clip();
+                    }
+                    ctx.drawImage(img, innerX, innerY, innerW, innerH);
+                    ctx.restore();
+                    idx++;
+                }
+            }
+        }
+
+        function toggleOrientation() {
+            orientation = orientation === 'landscape' ? 'portrait' : 'landscape';
+            [currentWidth, currentHeight] = [currentHeight, currentWidth];
+            canvas.width = currentWidth;
+            canvas.height = currentHeight;
+            updateGrid();
+        }
+
+        function shufflePhotos() {
+            photos.sort(() => Math.random() - 0.5);
+            renderPhotoList();
+            updateGrid();
+        }
+
+        function clearPhotos() {
+            photos = [];
+            renderPhotoList();
+            updateGrid();
+        }
+
+        function downloadImage(type) {
+            if (type === 'png') {
+                const link = document.createElement('a');
+                link.download = 'photo-grid.png';
+                link.href = canvas.toDataURL('image/png', 0.95);
+                link.click();
+            } else if (type === 'pdf') {
+                const { jsPDF } = window.jspdf;
+                const pdf = new jsPDF({
+                    orientation: canvas.width > canvas.height ? 'landscape' : 'portrait',
+                    unit: 'pt',
+                    format: [canvas.width, canvas.height]
+                });
+                pdf.addImage(canvas.toDataURL('image/jpeg', 0.95), 'JPEG', 0, 0, canvas.width, canvas.height);
+                pdf.save('photo-grid.pdf');
+            }
+        }
+
+        // Init
+        createSizeButtons();
+        canvas.width = 900;
+        canvas.height = 900;
+        updateGrid();
+    </script>
+</body>
+</html>
