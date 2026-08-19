@@ -19,6 +19,8 @@
         .control-group { margin: 15px 0; padding: 10px; background: #f9f9f9; border-radius: 6px; }
         .size-btn { display: inline-block; padding: 6px 12px; margin: 4px; background: #eee; border-radius: 4px; cursor: pointer; font-size: 0.9em; }
         .size-btn:hover, .size-btn.active { background: #007bff; color: white; }
+        .advanced-export { margin-top: 15px; padding: 10px; background: #eef6ff; border-radius: 6px; }
+        .advanced-export select { width: 100%; padding: 8px; }
     </style>
 </head>
 <body>
@@ -65,7 +67,11 @@
 
             <div class="control-group">
                 <button onclick="shufflePhotos()">Shuffle</button>
-                <button onclick="downloadImage('png')">Download PNG</button>
+                <div class="advanced-export">
+                    <strong>Advanced Export</strong>
+                    <span>Exports use one grid per JPG file or PDF page.</span>
+                </div>
+                <button onclick="downloadImage('jpg')">Download Separate JPGs</button>
                 <button onclick="downloadImage('pdf')">Download PDF</button>
             </div>
         </div>
@@ -78,19 +84,21 @@
 
     <script>
         let photos = [];
-        let orientation = 'landscape';
+        let orientation = 'portrait';
 
         const canvas = document.getElementById('gridCanvas');
         const ctx = canvas.getContext('2d');
         const photoListEl = document.getElementById('photoList');
 
         const sizes = [
-            {name: "Square", ratio: 1},
-            {name: "4x6", ratio: 6/4},
-            {name: "5x7", ratio: 7/5},
-            {name: "8x10", ratio: 10/8},
+            {name: "Square (1080 x 1080 px)", ratio: 1},
+            {name: "4x6", ratio: 4/6},
+            {name: "5x7", ratio: 5/7},
+            {name: "8x10", ratio: 8/10},
             {name: "Instagram", ratio: 1},
-            {name: "A4", ratio: 297/210},
+            {name: "A3 (297 x 420 mm)", ratio: 297/420},
+            {name: "A4 (210 x 297 mm)", ratio: 210/297},
+            {name: "A5 (148 x 210 mm)", ratio: 148/210},
         ];
 
         let currentWidth = 900;
@@ -107,9 +115,13 @@
                     document.querySelectorAll('.size-btn').forEach(b => b.classList.remove('active'));
                     btn.classList.add('active');
                     const base = 900;
-                    currentWidth = base;
-                    currentHeight = Math.round(base * size.ratio);
-                    if (orientation === 'portrait') [currentWidth, currentHeight] = [currentHeight, currentWidth];
+                    if (orientation === 'portrait') {
+                        currentWidth = Math.round(base * size.ratio);
+                        currentHeight = base;
+                    } else {
+                        currentWidth = base;
+                        currentHeight = Math.round(base * size.ratio);
+                    }
                     canvas.width = currentWidth;
                     canvas.height = currentHeight;
                     updateGrid();
@@ -161,13 +173,14 @@
             }
         };
 
-        function updateGrid() {
+        function renderGrid(targetCanvas, pagePhotos, renderScale = 1) {
+            const targetCtx = targetCanvas.getContext('2d');
             const rows = parseInt(document.getElementById('rows').value) || 3;
             const cols = parseInt(document.getElementById('cols').value) || 3;
             const enableGap = document.getElementById('enableGap').checked;
-            const gap = enableGap ? parseInt(document.getElementById('gap').value) : 0;
+            const gap = (enableGap ? parseInt(document.getElementById('gap').value) : 0) * renderScale;
             const enableBorder = document.getElementById('enableBorder').checked;
-            const border = enableBorder ? parseInt(document.getElementById('borderSize').value) : 0;
+            const border = (enableBorder ? parseInt(document.getElementById('borderSize').value) : 0) * renderScale;
             const borderColor = document.getElementById('borderColor').value;
             const rounded = document.getElementById('rounded').checked;
             const bg = document.getElementById('bgColor').value;
@@ -175,18 +188,18 @@
             document.getElementById('gapValue').textContent = gap;
             document.getElementById('borderValue').textContent = border;
 
-            ctx.fillStyle = bg;
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            targetCtx.fillStyle = bg;
+            targetCtx.fillRect(0, 0, targetCanvas.width, targetCanvas.height);
 
             const totalGapW = gap * (cols - 1);
             const totalGapH = gap * (rows - 1);
-            const cellW = (canvas.width - totalGapW) / cols;
-            const cellH = (canvas.height - totalGapH) / rows;
+            const cellW = (targetCanvas.width - totalGapW) / cols;
+            const cellH = (targetCanvas.height - totalGapH) / rows;
 
             let idx = 0;
             for (let r = 0; r < rows; r++) {
                 for (let c = 0; c < cols; c++) {
-                    const img = photos[idx % photos.length];
+                    const img = pagePhotos[idx];
                     if (!img) { idx++; continue; }
 
                     const x = c * (cellW + gap);
@@ -194,14 +207,14 @@
 
                     // Border
                     if (border > 0) {
-                        ctx.fillStyle = borderColor;
-                        ctx.beginPath();
+                        targetCtx.fillStyle = borderColor;
+                        targetCtx.beginPath();
                         if (rounded) {
-                            ctx.roundRect(x, y, cellW, cellH, 18);
+                            targetCtx.roundRect(x, y, cellW, cellH, 18 * renderScale);
                         } else {
-                            ctx.rect(x, y, cellW, cellH);
+                            targetCtx.rect(x, y, cellW, cellH);
                         }
-                        ctx.fill();
+                        targetCtx.fill();
                     }
 
                     // Image
@@ -210,16 +223,104 @@
                     const innerW = cellW - border * 2;
                     const innerH = cellH - border * 2;
 
-                    ctx.save();
+                    targetCtx.save();
                     if (rounded && innerW > 0) {
-                        ctx.beginPath();
-                        ctx.roundRect(innerX, innerY, innerW, innerH, 14);
-                        ctx.clip();
+                        targetCtx.beginPath();
+                        targetCtx.roundRect(innerX, innerY, innerW, innerH, 14 * renderScale);
+                        targetCtx.clip();
                     }
-                    ctx.drawImage(img, innerX, innerY, innerW, innerH);
-                    ctx.restore();
+                    targetCtx.drawImage(img, innerX, innerY, innerW, innerH);
+                    targetCtx.restore();
                     idx++;
                 }
+            }
+        }
+
+        function updateGrid() {
+            const gap = document.getElementById('enableGap').checked
+                ? parseInt(document.getElementById('gap').value) : 0;
+            const border = document.getElementById('enableBorder').checked
+                ? parseInt(document.getElementById('borderSize').value) : 0;
+            document.getElementById('gapValue').textContent = gap;
+            document.getElementById('borderValue').textContent = border;
+            renderGrid(canvas, photos.slice(0, getGridCapacity()));
+        }
+
+        function getGridCapacity() {
+            const rows = parseInt(document.getElementById('rows').value) || 3;
+            const cols = parseInt(document.getElementById('cols').value) || 3;
+            return rows * cols;
+        }
+
+        function getExportSize() {
+            const activeSize = [...document.querySelectorAll('.size-btn')]
+                .find(button => button.classList.contains('active'))?.textContent || '';
+            const paperSizes = {
+                'A3 (297 x 420 mm)': [3508, 4961, 297, 420],
+                'A4 (210 x 297 mm)': [2480, 3508, 210, 297],
+                'A5 (148 x 210 mm)': [1748, 2480, 148, 210]
+            };
+            const paper = paperSizes[activeSize];
+            if (paper) {
+                const isPortrait = orientation === 'portrait';
+                return {
+                    width: isPortrait ? paper[0] : paper[1],
+                    height: isPortrait ? paper[1] : paper[0],
+                    pdfWidth: isPortrait ? paper[2] : paper[3],
+                    pdfHeight: isPortrait ? paper[3] : paper[2]
+                };
+            }
+            return { width: canvas.width, height: canvas.height, pdfWidth: canvas.width * 25.4 / 96, pdfHeight: canvas.height * 25.4 / 96 };
+        }
+
+        function createExportCanvas(pagePhotos, exportSize) {
+            const pageCanvas = document.createElement('canvas');
+            pageCanvas.width = exportSize.width;
+            pageCanvas.height = exportSize.height;
+            renderGrid(pageCanvas, pagePhotos, exportSize.width / canvas.width);
+            return pageCanvas;
+        }
+
+        function downloadDataUrl(dataUrl, filename) {
+            const link = document.createElement('a');
+            link.download = filename;
+            link.href = dataUrl;
+            link.click();
+        }
+
+        function canvasToJpegDataUrl(sourceCanvas, quality = 0.92) {
+            return sourceCanvas.toDataURL('image/jpeg', quality);
+        }
+
+        function downloadImage(type) {
+            if (!photos.length) {
+                alert('Add at least one photo before exporting.');
+                return;
+            }
+
+            const capacity = getGridCapacity();
+            const exportSize = getExportSize();
+
+            if (type === 'pdf') {
+                const { jsPDF } = window.jspdf;
+                const pdf = new jsPDF({
+                    orientation: orientation,
+                    unit: 'mm',
+                    format: [exportSize.pdfWidth, exportSize.pdfHeight],
+                    compress: true
+                });
+                for (let start = 0, index = 0; start < photos.length; start += capacity, index++) {
+                    const page = createExportCanvas(photos.slice(start, start + capacity), exportSize);
+                    if (index > 0) pdf.addPage([exportSize.pdfWidth, exportSize.pdfHeight], orientation);
+                    pdf.addImage(canvasToJpegDataUrl(page), 'JPEG', 0, 0, exportSize.pdfWidth, exportSize.pdfHeight, undefined, 'NONE');
+                }
+                pdf.save('photo-grid.pdf');
+                return;
+            }
+
+            for (let start = 0, index = 0; start < photos.length; start += capacity, index++) {
+                const page = createExportCanvas(photos.slice(start, start + capacity), exportSize);
+                downloadDataUrl(canvasToJpegDataUrl(page, 0.95), `photo-grid-${index + 1}.jpg`);
             }
         }
 
@@ -243,29 +344,9 @@
             updateGrid();
         }
 
-        function downloadImage(type) {
-            if (type === 'png') {
-                const link = document.createElement('a');
-                link.download = 'photo-grid.png';
-                link.href = canvas.toDataURL('image/png', 0.95);
-                link.click();
-            } else if (type === 'pdf') {
-                const { jsPDF } = window.jspdf;
-                const pdf = new jsPDF({
-                    orientation: canvas.width > canvas.height ? 'landscape' : 'portrait',
-                    unit: 'pt',
-                    format: [canvas.width, canvas.height]
-                });
-                pdf.addImage(canvas.toDataURL('image/jpeg', 0.95), 'JPEG', 0, 0, canvas.width, canvas.height);
-                pdf.save('photo-grid.pdf');
-            }
-        }
-
         // Init
         createSizeButtons();
-        canvas.width = 900;
-        canvas.height = 900;
-        updateGrid();
+        document.querySelectorAll('.size-btn')[6].click();
     </script>
 </body>
 </html>
